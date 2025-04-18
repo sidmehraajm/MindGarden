@@ -23,8 +23,10 @@ struct CountdownOverlayView: View {
                     
                     if session.isDeepFocus {
                         Button(action: {
-                            if focusManager.requestEmergencyPass() {
-                                // Emergency pass granted
+                            Task {
+                                if focusManager.requestEmergencyPass() {
+                                    // Emergency pass granted
+                                }
                             }
                         }) {
                             Text("Emergency Pass")

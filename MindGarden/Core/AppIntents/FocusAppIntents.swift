@@ -40,7 +40,7 @@ struct StartFocusSessionIntent: AppIntent {
     var duration: FocusDuration
     
     func perform() async throws -> some IntentResult {
-        let focusManager = try await DependencyContainer.shared.resolve(FocusManager.self)
+        let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
         
         let tier = FocusManager.FocusTier(rawValue: duration.rawValue / 60) ?? .medium
         await focusManager.startSession(tier: tier)
@@ -54,7 +54,7 @@ struct StopFocusSessionIntent: AppIntent {
     static var title: LocalizedStringResource = "Stop Focus Session"
     
     func perform() async throws -> some IntentResult {
-        let focusManager = try await DependencyContainer.shared.resolve(FocusManager.self)
+        let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
         
         try await focusManager.stopSession()
         
@@ -67,8 +67,8 @@ struct GetFocusStatsIntent: AppIntent {
     static var title: LocalizedStringResource = "Get Focus Stats"
     
     func perform() async throws -> some IntentResult {
-        let settings = try await DependencyContainer.shared.resolve(SettingsManager.self)
-        let focusManager = try await DependencyContainer.shared.resolve(FocusManager.self)
+        let settings: SettingsManager = try await DependencyContainer.shared.resolve()
+        let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
         
         let totalTime = await focusManager.totalFocusTime
         let hours = Int(totalTime / 3600)

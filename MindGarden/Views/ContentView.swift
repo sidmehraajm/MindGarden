@@ -2,8 +2,24 @@ import SwiftUI
 import FamilyControls
 
 struct ContentView: View {
-    @StateObject private var focusManager = FocusManager()
-    @StateObject private var settingsManager = SettingsManager()
+    @StateObject private var focusManager: FocusManager
+    @StateObject private var settingsManager: SettingsManager
+    
+    init() {
+        // Get shared instances from DependencyContainer
+        let container = DependencyContainer.shared
+        do {
+            let focus: FocusManager = try container.resolve()
+            let settings: SettingsManager = try container.resolve()
+            self._focusManager = StateObject(wrappedValue: focus)
+            self._settingsManager = StateObject(wrappedValue: settings)
+        } catch {
+            // Fallback to shared instance if dependency resolution fails
+            self._focusManager = StateObject(wrappedValue: FocusManager.shared)
+            self._settingsManager = StateObject(wrappedValue: SettingsManager())
+            print("Error resolving dependencies: \(error)")
+        }
+    }
     
     var body: some View {
         TabView {

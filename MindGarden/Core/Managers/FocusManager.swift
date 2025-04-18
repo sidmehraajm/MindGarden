@@ -15,7 +15,8 @@ class FocusManager: ObservableObject {
     
     private let store = ManagedSettingsStore()
     private let center = AuthorizationCenter.shared
-    private let blockingManager: BlockingManager
+    private var blockingManager: BlockingManager?
+    private var settingsManager: SettingsManager?
     private var timer: Timer?
     private var gracePeriodTimer: Timer?
     private var isInGracePeriod = false
@@ -23,12 +24,22 @@ class FocusManager: ObservableObject {
     private let maxEmergencyPasses = 1
     private var lastEmergencyPassDate: Date?
     private var cancellables = Set<AnyCancellable>()
-    private let settingsManager: SettingsManager
     
-    init() {
-        self.blockingManager = try! DependencyContainer.shared.resolve(BlockingManager.self)
-        self.settingsManager = try! DependencyContainer.shared.resolve(SettingsManager.self)
-        
+    private init() {
+        // We'll set up dependencies after they've been registered
+        setupMonitoring()
+    }
+    
+    func setupDependencies() {
+        do {
+            self.blockingManager = try DependencyContainer.shared.resolve()
+            self.settingsManager = try DependencyContainer.shared.resolve()
+        } catch {
+            print("Failed to resolve dependencies: \(error)")
+        }
+    }
+    
+    private func setupMonitoring() {
         // Start monitoring for device activity changes
         NotificationCenter.default.publisher(for: .deviceActivityMonitorDidChange)
             .sink { [weak self] _ in
@@ -78,6 +89,7 @@ class FocusManager: ObservableObject {
         case noActiveSession
         case authorizationFailed
         case blockingFailed
+        case missingDependencies
     }
     
     func requestAuthorization() async throws {
@@ -117,6 +129,10 @@ class FocusManager: ObservableObject {
         totalFocusTime += duration
         
         // Update daily stats
+        guard let settingsManager = settingsManager else {
+            throw FocusError.missingDependencies
+        }
+        
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         
@@ -166,6 +182,9 @@ class FocusManager: ObservableObject {
     }
     
     private func applyBlockingRules() {
+        guard let blockingManager = blockingManager, 
+              let settingsManager = settingsManager else { return }
+        
         blockingManager.applyBlockingRules(
             apps: settingsManager.selectedApps,
             websites: settingsManager.selectedWebsites
@@ -173,7 +192,7 @@ class FocusManager: ObservableObject {
     }
     
     private func removeBlockingRules() {
-        blockingManager.removeBlockingRules()
+        blockingManager?.removeBlockingRules()
     }
     
     func requestEmergencyPass() -> Bool {

@@ -47,11 +47,15 @@ class BlockingManager: ObservableObject {
     }
     
     private func reapplyBlockingRules() {
-        guard let settingsManager = try? DependencyContainer.shared.resolve(SettingsManager.self) else { return }
-        applyBlockingRules(
-            apps: settingsManager.selectedApps,
-            websites: settingsManager.selectedWebsites
-        )
+        do {
+            let settingsManager: SettingsManager = try DependencyContainer.shared.resolve()
+            applyBlockingRules(
+                apps: settingsManager.selectedApps,
+                websites: settingsManager.selectedWebsites
+            )
+        } catch {
+            print("Failed to resolve SettingsManager: \(error)")
+        }
     }
 }
 

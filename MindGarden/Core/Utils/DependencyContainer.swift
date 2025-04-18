@@ -7,18 +7,19 @@ class DependencyContainer {
     private var dependencies: [String: Any] = [:]
     
     private init() {
-        // Register default dependencies
+        // Register core dependencies here instead of relying on external registration
         register(SettingsManager())
-        register(FocusManager())
+        register(BlockingManager())
+        register(FocusManager.shared)
     }
     
-    func register<T>(_ dependency: T) {
+    func register<T>(_ instance: T) {
         let key = String(describing: T.self)
-        dependencies[key] = dependency
+        dependencies[key] = instance
     }
     
-    func resolve<T>(_ type: T.Type) throws -> T {
-        let key = String(describing: type)
+    func resolve<T>() throws -> T {
+        let key = String(describing: T.self)
         guard let dependency = dependencies[key] as? T else {
             throw DependencyError.unregisteredDependency
         }

@@ -10,7 +10,7 @@ class ContentFilterProvider: NEFilterDataProvider {
         super.init()
         Task {
             do {
-                settingsManager = try await DependencyContainer.shared.resolve(SettingsManager.self)
+                settingsManager = try await DependencyContainer.shared.resolve()
                 selectedWebsites = await settingsManager?.selectedWebsites ?? []
             } catch {
                 NSLog("Failed to resolve SettingsManager: \(error)")
@@ -21,7 +21,7 @@ class ContentFilterProvider: NEFilterDataProvider {
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         Task {
             do {
-                settingsManager = try await DependencyContainer.shared.resolve(SettingsManager.self)
+                settingsManager = try await DependencyContainer.shared.resolve()
                 selectedWebsites = await settingsManager?.selectedWebsites ?? []
                 completionHandler(nil)
             } catch {

@@ -13,14 +13,27 @@ import NetworkExtension
 
 @main
 struct MindGardenApp: App {
-    @StateObject private var focusManager = FocusManager()
-    @StateObject private var settingsManager = SettingsManager()
+    // Use StateObjects for the shared instances
+    @StateObject private var focusManager = FocusManager.shared
+    
+    init() {
+        // Initialize the dependency container first
+        let _ = DependencyContainer.shared
+        // Set up dependencies
+        FocusManager.shared.setupDependencies()
+    }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(focusManager)
-                .environmentObject(settingsManager)
+                .task {
+                    // Request authorization when app starts
+                    do {
+                        try await focusManager.requestAuthorization()
+                    } catch {
+                        print("Failed to request authorization: \(error)")
+                    }
+                }
         }
     }
 }
