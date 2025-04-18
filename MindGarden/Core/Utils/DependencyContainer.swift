@@ -7,9 +7,21 @@ class DependencyContainer {
     private var dependencies: [String: Any] = [:]
     
     private init() {
-        // Register core dependencies here instead of relying on external registration
-        register(SettingsManager())
-        register(BlockingManager())
+        // Register dependencies in the correct order
+        let settingsManager = SettingsManager()
+        let blockingManager = BlockingManager()
+        
+        // First register the individual managers
+        register(settingsManager)
+        register(blockingManager)
+        
+        // Initialize FocusManager with its dependencies
+        FocusManager.shared = FocusManager(
+            settingsManager: settingsManager,
+            blockingManager: blockingManager
+        )
+        
+        // Then register the FocusManager
         register(FocusManager.shared)
     }
     

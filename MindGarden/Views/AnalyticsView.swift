@@ -56,8 +56,8 @@ struct AnalyticsView: View {
             SummaryCard(
                 value: settingsManager.analytics.breaksTaken,
                 label: "Breaks Taken",
-                color: .orange,
-                icon: "cup.and.saucer.fill"
+                icon: "cup.and.saucer.fill",
+                color: .orange
             )
         }
     }
@@ -173,21 +173,21 @@ struct AnalyticsView: View {
 struct SummaryCard: View {
     let value: Double
     let label: String
-    let color: Color
     let icon: String
+    let color: Color
     
-    init(value: Double, label: String, color: Color, icon: String) {
+    init(value: Double, label: String, icon: String, color: Color) {
         self.value = value
         self.label = label
-        self.color = color
         self.icon = icon
+        self.color = color
     }
     
-    init(value: Int, label: String, color: Color, icon: String) {
+    init(value: Int, label: String, icon: String, color: Color) {
         self.value = Double(value)
         self.label = label
-        self.color = color
         self.icon = icon
+        self.color = color
     }
     
     var body: some View {

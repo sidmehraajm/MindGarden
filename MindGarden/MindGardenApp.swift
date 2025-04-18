@@ -13,27 +13,35 @@ import NetworkExtension
 
 @main
 struct MindGardenApp: App {
-    // Use StateObjects for the shared instances
     @StateObject private var focusManager = FocusManager.shared
     
+    // Explicitly resolve other managers for use in environment
+    @StateObject private var settingsManager: SettingsManager
+    @StateObject private var blockingManager: BlockingManager
+    
     init() {
-        // Initialize the dependency container first
+        // Initialize the dependency container - this will create and register all dependencies
         let _ = DependencyContainer.shared
-        // Set up dependencies
-        FocusManager.shared.setupDependencies()
+        
+        // Resolve the managers from the dependency container
+        do {
+            let resolvedSettingsManager: SettingsManager = try DependencyContainer.shared.resolve()
+            let resolvedBlockingManager: BlockingManager = try DependencyContainer.shared.resolve()
+            
+            // Initialize the StateObjects with the resolved managers
+            _settingsManager = StateObject(wrappedValue: resolvedSettingsManager)
+            _blockingManager = StateObject(wrappedValue: resolvedBlockingManager)
+        } catch {
+            fatalError("Failed to resolve required dependencies: \(error)")
+        }
     }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .task {
-                    // Request authorization when app starts
-                    do {
-                        try await focusManager.requestAuthorization()
-                    } catch {
-                        print("Failed to request authorization: \(error)")
-                    }
-                }
+                .environmentObject(focusManager)
+                .environmentObject(settingsManager)
+                .environmentObject(blockingManager)
         }
     }
 }

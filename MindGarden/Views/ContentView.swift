@@ -2,24 +2,9 @@ import SwiftUI
 import FamilyControls
 
 struct ContentView: View {
-    @StateObject private var focusManager: FocusManager
-    @StateObject private var settingsManager: SettingsManager
-    
-    init() {
-        // Get shared instances from DependencyContainer
-        let container = DependencyContainer.shared
-        do {
-            let focus: FocusManager = try container.resolve()
-            let settings: SettingsManager = try container.resolve()
-            self._focusManager = StateObject(wrappedValue: focus)
-            self._settingsManager = StateObject(wrappedValue: settings)
-        } catch {
-            // Fallback to shared instance if dependency resolution fails
-            self._focusManager = StateObject(wrappedValue: FocusManager.shared)
-            self._settingsManager = StateObject(wrappedValue: SettingsManager())
-            print("Error resolving dependencies: \(error)")
-        }
-    }
+    @EnvironmentObject private var focusManager: FocusManager
+    @EnvironmentObject private var settingsManager: SettingsManager
+    @EnvironmentObject private var blockingManager: BlockingManager
     
     var body: some View {
         TabView {
@@ -38,8 +23,6 @@ struct ContentView: View {
                     Label("Settings", systemImage: "gear")
                 }
         }
-        .environmentObject(focusManager)
-        .environmentObject(settingsManager)
     }
 }
 
@@ -72,7 +55,9 @@ struct FocusView: View {
                 // Action buttons
                 if focusManager.isInGracePeriod {
                     Button(action: {
-                        focusManager.endBreakEarly()
+                        Task {
+                            await focusManager.endBreakEarly()
+                        }
                     }) {
                         Text("End Break Early")
                             .fontWeight(.semibold)
@@ -100,13 +85,19 @@ struct FocusView: View {
                             message: Text("Apps and websites will be unblocked temporarily"),
                             buttons: [
                                 .default(Text("Short Break (\(shortBreakMinutes) min)")) {
-                                    focusManager.startBreak(duration: TimeInterval(shortBreakMinutes * 60))
+                                    Task {
+                                        await focusManager.startBreak(duration: TimeInterval(shortBreakMinutes * 60))
+                                    }
                                 },
                                 .default(Text("Medium Break (\(mediumBreakMinutes) min)")) {
-                                    focusManager.startBreak(duration: TimeInterval(mediumBreakMinutes * 60))
+                                    Task {
+                                        await focusManager.startBreak(duration: TimeInterval(mediumBreakMinutes * 60))
+                                    }
                                 },
                                 .default(Text("Long Break (\(longBreakMinutes) min)")) {
-                                    focusManager.startBreak(duration: TimeInterval(longBreakMinutes * 60))
+                                    Task {
+                                        await focusManager.startBreak(duration: TimeInterval(longBreakMinutes * 60))
+                                    }
                                 },
                                 .cancel()
                             ]
