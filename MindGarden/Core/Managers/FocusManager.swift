@@ -3,180 +3,154 @@ import FamilyControls
 import ManagedSettings
 import DeviceActivity
 import Combine
+import SwiftUI
 
 @MainActor
 class FocusManager: ObservableObject {
     static let shared = FocusManager()
     
-    @Published private(set) var currentSession: FocusSession?
-    @Published private(set) var isActive = false
-    @Published private(set) var remainingTime: TimeInterval = 0
-    @Published private(set) var totalFocusTime: TimeInterval = 0
+    enum FocusTier: Int, CaseIterable {
+        case low = 15
+        case medium = 30
+        case high = 60
+        case deep = 120
+    }
     
-    private let store = ManagedSettingsStore()
-    private let center = AuthorizationCenter.shared
+    struct FocusSession {
+        var tier: FocusTier
+        var startTime: Date
+        var endTime: Date
+        var isActive: Bool = true
+        var isDeepFocus: Bool
+        var emergencyPassAvailable: Bool = true
+        var lastEmergencyPassDate: Date?
+        
+        init(tier: FocusTier, startTime: Date = Date(), duration: TimeInterval, isDeepFocus: Bool = false, lastEmergencyPassDate: Date? = nil) {
+            self.tier = tier
+            self.startTime = startTime
+            self.endTime = startTime.addingTimeInterval(duration)
+            self.isDeepFocus = isDeepFocus
+            self.lastEmergencyPassDate = lastEmergencyPassDate
+        }
+    }
+    
+    @Published var currentSession: FocusSession?
+    @Published var isActive: Bool = false
+    @Published var isInGracePeriod: Bool = false
+    @Published var breakEndTime: Date?
+    
+    @Published var totalFocusTime: TimeInterval = 0
+    @Published var totalFocusMinutesToday: Int = 0
+    
+    private let maxEmergencyPasses: Int = 1
+    @Published var emergencyPassesUsed: Int = 0
+    @Published var lastEmergencyPassDate: Date?
+    
     private var blockingManager: BlockingManager?
     private var settingsManager: SettingsManager?
     private var timer: Timer?
     private var gracePeriodTimer: Timer?
-    private var isInGracePeriod = false
-    private var emergencyPassesUsed = 0
-    private let maxEmergencyPasses = 1
-    private var lastEmergencyPassDate: Date?
     private var cancellables = Set<AnyCancellable>()
     
-    private init() {
-        // We'll set up dependencies after they've been registered
-        setupMonitoring()
-    }
-    
-    func setupDependencies() {
-        do {
-            self.blockingManager = try DependencyContainer.shared.resolve()
-            self.settingsManager = try DependencyContainer.shared.resolve()
-        } catch {
-            print("Failed to resolve dependencies: \(error)")
-        }
-    }
-    
-    private func setupMonitoring() {
-        // Start monitoring for device activity changes
-        NotificationCenter.default.publisher(for: .deviceActivityMonitorDidChange)
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.reapplyBlockingRules()
+    init() {
+        Task {
+            do {
+                self.blockingManager = try DependencyContainer.shared.resolve()
+                self.settingsManager = try DependencyContainer.shared.resolve()
+                
+                try await blockingManager?.requestAuthorization()
+                
+                applyBlockingRules()
+                
+                startDeepFocusMonitoring()
+                
+                if let settings = settingsManager {
+                    totalFocusTime = settings.analytics.totalFocusTime
+                    totalFocusMinutesToday = Int(settings.analytics.dailyStats[Calendar.current.startOfDay(for: Date())]?.focusTime ?? 0) / 60
                 }
-            }
-            .store(in: &cancellables)
-    }
-    
-    enum FocusTier: Int, CaseIterable {
-        case low = 5
-        case medium = 15
-        case high = 30
-        case deep = 60
-        
-        var duration: TimeInterval {
-            TimeInterval(self.rawValue * 60)
-        }
-        
-        var gracePeriod: TimeInterval {
-            switch self {
-            case .low: return 30
-            case .medium: return 15
-            case .high: return 5
-            case .deep: return 0
+                
+                if let lastDate = settings.analytics.lastEmergencyPassDate {
+                    lastEmergencyPassDate = lastDate
+                }
+                
+                isActive = true
+            } catch {
+                print("Failed to initialize FocusManager: \(error)")
             }
         }
     }
     
-    struct FocusSession {
-        let tier: FocusTier
-        let startTime: Date
-        let endTime: Date
-        let lastEmergencyPassDate: Date?
-        var overrideAttempts: Int = 0
-        
-        var isDeepFocus: Bool { tier == .deep }
-        var emergencyPassAvailable: Bool {
-            guard tier == .deep else { return false }
-            guard let lastPassDate = lastEmergencyPassDate else { return true }
-            return Calendar.current.isDateInThisWeek(lastPassDate)
-        }
-    }
-    
-    enum FocusError: Error {
-        case noActiveSession
-        case authorizationFailed
-        case blockingFailed
-        case missingDependencies
-    }
-    
-    func requestAuthorization() async throws {
-        try await center.requestAuthorization(for: .individual)
-    }
-    
-    func startSession(tier: FocusTier) async {
-        let session = FocusSession(
-            tier: tier,
-            startTime: Date(),
-            endTime: Date().addingTimeInterval(tier.duration),
-            lastEmergencyPassDate: lastEmergencyPassDate
-        )
-        
-        currentSession = session
-        isActive = true
-        remainingTime = tier.duration
-        
-        if tier.gracePeriod > 0 {
-            startGracePeriod(duration: tier.gracePeriod)
-        } else {
-            applyBlockingRules()
-        }
-        
-        startTimer()
-        if tier == .deep {
-            startDeepFocusMonitoring()
-        }
-    }
-    
-    func stopSession() async throws {
-        guard let session = currentSession else {
-            throw FocusError.noActiveSession
-        }
-        
-        let duration = Date().timeIntervalSince(session.startTime)
-        totalFocusTime += duration
-        
-        // Update daily stats
-        guard let settingsManager = settingsManager else {
-            throw FocusError.missingDependencies
-        }
-        
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        
-        var analytics = settingsManager.analytics
-        var dailyStats = analytics.dailyStats[today] ?? DailyStats()
-        dailyStats.focusTime += duration
-        dailyStats.completedSessions += 1
-        dailyStats.overrideAttempts += session.overrideAttempts
-        analytics.dailyStats[today] = dailyStats
-        settingsManager.analytics = analytics
-        
-        currentSession = nil
-        isActive = false
-        remainingTime = 0
+    deinit {
         timer?.invalidate()
         gracePeriodTimer?.invalidate()
+        cancellables.forEach { $0.cancel() }
+    }
+    
+    func startBreak(duration: TimeInterval) {
+        isInGracePeriod = true
+        breakEndTime = Date().addingTimeInterval(duration)
+        
         removeBlockingRules()
         
-        NotificationCenter.default.post(name: .focusSessionDidEnd, object: nil)
-    }
-    
-    private func startTimer() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self = self, let session = self.currentSession else { return }
-                
-                let remaining = session.endTime.timeIntervalSince(Date())
-                if remaining <= 0 {
-                    try? await self.stopSession()
-                } else {
-                    self.remainingTime = remaining
-                }
-            }
-        }
-    }
-    
-    private func startGracePeriod(duration: TimeInterval) {
-        isInGracePeriod = true
         gracePeriodTimer?.invalidate()
         gracePeriodTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.isInGracePeriod = false
+                self?.breakEndTime = nil
                 self?.applyBlockingRules()
+                self?.updateBreakStats()
+            }
+        }
+        
+        updateBreakStats()
+    }
+    
+    func endBreakEarly() {
+        gracePeriodTimer?.invalidate()
+        isInGracePeriod = false
+        breakEndTime = nil
+        applyBlockingRules()
+    }
+    
+    func startSession(tier: FocusTier) async {
+        startBreak(duration: TimeInterval(tier.rawValue * 60))
+    }
+    
+    func stopSession() async throws {
+        if isInGracePeriod {
+            endBreakEarly()
+        }
+    }
+    
+    func requestEmergencyPass() -> Bool {
+        if let lastDate = lastEmergencyPassDate, 
+           Calendar.current.isDateInToday(lastDate) {
+            return false
+        }
+        
+        lastEmergencyPassDate = Date()
+        
+        startBreak(duration: 3600)
+        
+        Task {
+            if let settings = settingsManager {
+                settings.analytics.lastEmergencyPassDate = lastEmergencyPassDate
+                settings.analytics.overrideAttempts += 1
+            }
+        }
+        
+        return true
+    }
+    
+    private func updateBreakStats() {
+        Task {
+            if let settings = settingsManager {
+                settings.analytics.breaksTaken += 1
+                
+                let today = Calendar.current.startOfDay(for: Date())
+                var dailyStats = settings.analytics.dailyStats[today] ?? DailyStats()
+                dailyStats.breaksTaken += 1
+                settings.analytics.dailyStats[today] = dailyStats
             }
         }
     }
@@ -195,55 +169,30 @@ class FocusManager: ObservableObject {
         blockingManager?.removeBlockingRules()
     }
     
-    func requestEmergencyPass() -> Bool {
-        guard let session = currentSession,
-              session.isDeepFocus,
-              session.emergencyPassAvailable,
-              emergencyPassesUsed < maxEmergencyPasses else {
-            return false
-        }
-        
-        emergencyPassesUsed += 1
-        lastEmergencyPassDate = Date()
-        Task {
-            try? await stopSession()
-        }
-        return true
-    }
-    
     private func startDeepFocusMonitoring() {
-        // Monitor for permission changes
         NotificationCenter.default.publisher(for: .deviceActivityMonitorDidChange)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.reapplyDeepFocusRestrictions()
+                    if let self = self, !self.isInGracePeriod {
+                        self.reapplyBlockingRules()
+                    }
                 }
             }
             .store(in: &cancellables)
     }
     
-    func reapplyDeepFocusRestrictions() {
-        guard let session = currentSession, session.isDeepFocus else { return }
-        applyBlockingRules()
-    }
-    
     private func reapplyBlockingRules() {
-        guard isActive else { return }
+        guard isActive, !isInGracePeriod else { return }
         applyBlockingRules()
     }
 }
 
-// MARK: - Calendar Extension
 extension Calendar {
     func isDateInThisWeek(_ date: Date) -> Bool {
-        let currentWeek = component(.weekOfYear, from: Date())
-        let dateWeek = component(.weekOfYear, from: date)
-        return currentWeek == dateWeek
+        return isDate(date, equalTo: Date(), toGranularity: .weekOfYear)
     }
 }
 
-// MARK: - Notification Names
 extension Notification.Name {
-    static let deviceActivityMonitorDidChange = Notification.Name("deviceActivityMonitorDidChange")
-    static let focusSessionDidEnd = Notification.Name("focusSessionDidEnd")
+    static let deviceActivityMonitorDidChange = Notification.Name("com.apple.deviceactivity.monitor.did-change")
 } 

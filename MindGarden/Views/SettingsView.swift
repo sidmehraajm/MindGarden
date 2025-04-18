@@ -25,7 +25,6 @@ struct SettingsView: View {
                             var apps = Array(settingsManager.selectedApps)
                             apps.remove(atOffsets: indexSet)
                             settingsManager.selectedApps = Set(apps)
-                            settingsManager.saveSelectedApps()
                         }
                     }
                 }
@@ -41,7 +40,6 @@ struct SettingsView: View {
                                 var websites = settingsManager.selectedWebsites
                                 websites.insert(newWebsite)
                                 settingsManager.selectedWebsites = websites
-                                settingsManager.saveSelectedWebsites()
                                 newWebsite = ""
                             }
                         }
@@ -55,8 +53,13 @@ struct SettingsView: View {
                             var websites = Array(settingsManager.selectedWebsites)
                             websites.remove(atOffsets: indexSet)
                             settingsManager.selectedWebsites = Set(websites)
-                            settingsManager.saveSelectedWebsites()
                         }
+                    }
+                }
+                
+                Section(header: Text("Break Durations")) {
+                    NavigationLink("Configure Break Times") {
+                        BreakDurationView()
                     }
                 }
                 
@@ -72,17 +75,45 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showingAppPicker) {
-                FamilyActivityPicker(selection: $selectedActivitySelection)
-                    .onDisappear {
-                        // Just store a placeholder identifier for demo purposes
-                        // In a real app, you would want to properly extract identifiers
-                        if !selectedActivitySelection.applicationTokens.isEmpty {
-                            settingsManager.selectedApps = ["com.example.app1", "com.example.app2"]
-                            settingsManager.saveSelectedApps()
-                        }
-                    }
+                NavigationView {
+                    FamilyActivityPicker(selection: $selectedActivitySelection)
+                        .navigationTitle("Select Apps")
+                        .navigationBarItems(
+                            trailing: Button("Done") {
+                                showingAppPicker = false
+                                // Just store a placeholder identifier for demo purposes
+                                // In a real app, you would want to properly extract identifiers
+                                if !selectedActivitySelection.applicationTokens.isEmpty {
+                                    settingsManager.selectedApps = ["com.example.app1", "com.example.app2"]
+                                }
+                            }
+                        )
+                }
             }
         }
+    }
+}
+
+struct BreakDurationView: View {
+    @AppStorage("shortBreakMinutes") private var shortBreakMinutes = 5
+    @AppStorage("mediumBreakMinutes") private var mediumBreakMinutes = 15
+    @AppStorage("longBreakMinutes") private var longBreakMinutes = 30
+    
+    var body: some View {
+        Form {
+            Section(header: Text("Break Durations")) {
+                Stepper("Short Break: \(shortBreakMinutes) min", value: $shortBreakMinutes, in: 1...15)
+                Stepper("Medium Break: \(mediumBreakMinutes) min", value: $mediumBreakMinutes, in: 10...30)
+                Stepper("Long Break: \(longBreakMinutes) min", value: $longBreakMinutes, in: 15...60)
+            }
+            
+            Section(header: Text("About Breaks")) {
+                Text("Breaks temporarily pause blocking of apps and websites. After the break ends, blocking will resume automatically.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .navigationTitle("Break Durations")
     }
 }
 
@@ -97,19 +128,19 @@ struct TutorialView: View {
                     
                     Text("1. Select Apps to Block")
                         .font(.headline)
-                    Text("Choose which apps you want to block during focus sessions. These apps will be inaccessible during active focus periods.")
+                    Text("Choose which apps you want to block during the day. These apps will be inaccessible unless you take a break.")
                     
                     Text("2. Add Websites to Block")
                         .font(.headline)
-                    Text("Enter the URLs of websites you want to block. These sites will be inaccessible during focus sessions.")
+                    Text("Enter the URLs of websites you want to block throughout the day. These sites will be inaccessible unless you take a break.")
                     
-                    Text("3. Choose Focus Tier")
+                    Text("3. All-Day Focus")
                         .font(.headline)
-                    Text("Select from four focus tiers:\n• Low (5 minutes)\n• Medium (15 minutes)\n• High (30 minutes)\n• Deep (60 minutes)")
+                    Text("Mind Garden blocks your selected apps and websites all day to help you maintain focus.")
                     
-                    Text("4. Start Focus Session")
+                    Text("4. Break Types")
                         .font(.headline)
-                    Text("Tap on your desired focus tier to begin. The timer will show your remaining time, and selected apps/websites will be blocked.")
+                    Text("When you need access to blocked content, you can choose a break:\n• Short Break (5 minutes)\n• Medium Break (15 minutes)\n• Long Break (30 minutes)\nAfter your break ends, blocking will automatically resume.")
                 }
                 .padding(.horizontal)
             }

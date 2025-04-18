@@ -35,53 +35,71 @@ enum FocusDuration: Int, CaseIterable, AppEnum {
 // MARK: - Start Focus Session Intent
 struct StartFocusSessionIntent: AppIntent {
     static var title: LocalizedStringResource = "Start Focus Session"
+    static var description = IntentDescription("Start a focus session with the specified duration")
     
-    @Parameter(title: "Duration")
+    @Parameter(title: "Duration", description: "How long to focus for")
     var duration: FocusDuration
     
     func perform() async throws -> some IntentResult {
-        let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
-        
-        let tier = FocusManager.FocusTier(rawValue: duration.rawValue / 60) ?? .medium
-        await focusManager.startSession(tier: tier)
-        
-        return .result(value: "Started focus session for \(duration.rawValue) minutes")
+        do {
+            let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
+            let minutes = duration.rawValue
+            await focusManager.startSession(tier: duration.focusTier)
+            return .result(value: "Started focus session for \(minutes) minutes")
+        } catch {
+            throw IntentError.focusManagerError("Failed to start session: \(error.localizedDescription)")
+        }
     }
 }
 
 // MARK: - Stop Focus Session Intent
 struct StopFocusSessionIntent: AppIntent {
     static var title: LocalizedStringResource = "Stop Focus Session"
+    static var description = IntentDescription("Stop the current focus session")
     
     func perform() async throws -> some IntentResult {
-        let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
-        
-        try await focusManager.stopSession()
-        
-        return .result(value: "Stopped focus session")
+        do {
+            let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
+            try await focusManager.stopSession()
+            return .result(value: "Stopped focus session")
+        } catch {
+            throw IntentError.focusManagerError("Failed to stop session: \(error.localizedDescription)")
+        }
     }
 }
 
 // MARK: - Get Focus Stats Intent
 struct GetFocusStatsIntent: AppIntent {
     static var title: LocalizedStringResource = "Get Focus Stats"
+    static var description = IntentDescription("Get your focus statistics")
     
     func perform() async throws -> some IntentResult {
-        let settings: SettingsManager = try await DependencyContainer.shared.resolve()
-        let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
-        
-        let totalTime = await focusManager.totalFocusTime
-        let hours = Int(totalTime / 3600)
-        let minutes = Int((totalTime.truncatingRemainder(dividingBy: 3600)) / 60)
-        
-        let overrides = await settings.analytics.overrideAttempts
-        
-        return .result(value: "Total focus time: \(hours)h \(minutes)m\nOverride attempts: \(overrides)")
+        do {
+            let settings: SettingsManager = try await DependencyContainer.shared.resolve()
+            let focusManager: FocusManager = try await DependencyContainer.shared.resolve()
+            
+            let totalTime = await focusManager.totalFocusTime
+            let hours = Int(totalTime / 3600)
+            let minutes = Int((totalTime.truncatingRemainder(dividingBy: 3600)) / 60)
+            
+            let overrides = await settings.analytics.overrideAttempts
+            
+            return .result(value: "Total focus time: \(hours)h \(minutes)m\nOverride attempts: \(overrides)")
+        } catch {
+            throw IntentError.settingsManagerError("Failed to get stats: \(error.localizedDescription)")
+        }
     }
 }
 
 // MARK: - Intent Error Enum
-enum IntentError: Error {
+enum IntentError: Error, CustomStringConvertible {
     case focusManagerError(String)
     case settingsManagerError(String)
+    
+    var description: String {
+        switch self {
+        case .focusManagerError(let message): return message
+        case .settingsManagerError(let message): return message
+        }
+    }
 } 

@@ -84,17 +84,14 @@ class SettingsManager: ObservableObject {
 struct Analytics: Codable {
     var totalFocusTime: TimeInterval = 0
     var overrideAttempts: Int = 0
+    var breaksTaken: Int = 0
+    var lastEmergencyPassDate: Date?
     var dailyStats: [Date: DailyStats] = [:]
 }
 
 struct DailyStats: Codable {
-    var focusTime: TimeInterval
-    var overrideAttempts: Int
-    var completedSessions: Int
-    
-    init(focusTime: TimeInterval = 0, overrideAttempts: Int = 0, completedSessions: Int = 0) {
-        self.focusTime = focusTime
-        self.overrideAttempts = overrideAttempts
-        self.completedSessions = completedSessions
-    }
+    var focusTime: TimeInterval = 0
+    var overrideAttempts: Int = 0
+    var completedSessions: Int = 0
+    var breaksTaken: Int = 0
 } 

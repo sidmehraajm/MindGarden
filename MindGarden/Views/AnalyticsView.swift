@@ -2,160 +2,221 @@ import SwiftUI
 import Charts
 
 struct AnalyticsView: View {
+    @EnvironmentObject private var focusManager: FocusManager
     @EnvironmentObject private var settingsManager: SettingsManager
+    @State private var selectedTimeframe: Timeframe = .week
+    
+    enum Timeframe {
+        case day
+        case week
+        case month
+    }
     
     var body: some View {
         NavigationView {
             ScrollView {
-                VStack(spacing: 20) {
-                    SummaryCard()
+                VStack(spacing: 25) {
+                    // Time frame picker
+                    Picker("Timeframe", selection: $selectedTimeframe) {
+                        Text("Today").tag(Timeframe.day)
+                        Text("Week").tag(Timeframe.week)
+                        Text("Month").tag(Timeframe.month)
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.horizontal)
                     
-                    DailyStatsChart()
+                    // Summary cards
+                    summaryCardsView
                     
-                    FocusTimeCard()
+                    // Charts
+                    if #available(iOS 16.0, *) {
+                        focusBreakChartView
+                    } else {
+                        legacyStatsView
+                    }
                     
-                    OverrideAttemptsCard()
+                    // Block stats
+                    blockingStatsView
                 }
                 .padding()
             }
             .navigationTitle("Analytics")
         }
     }
-}
-
-struct SummaryCard: View {
-    @EnvironmentObject private var settingsManager: SettingsManager
     
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Summary")
-                .font(.title2)
-                .fontWeight(.bold)
+    private var summaryCardsView: some View {
+        HStack(spacing: 15) {
+            SummaryCard(
+                value: totalFocusHours,
+                label: "Focus Hours",
+                icon: "clock.fill",
+                color: .green
+            )
             
-            HStack {
-                VStack(alignment: .leading) {
-                    Text("Total Focus Time")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text(formatTime(settingsManager.analytics.totalFocusTime))
-                        .font(.title3)
-                        .fontWeight(.bold)
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing) {
-                    Text("Override Attempts")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Text("\(settingsManager.analytics.overrideAttempts)")
-                        .font(.title3)
-                        .fontWeight(.bold)
-                }
-            }
+            SummaryCard(
+                value: settingsManager.analytics.breaksTaken,
+                label: "Breaks Taken",
+                color: .orange,
+                icon: "cup.and.saucer.fill"
+            )
         }
-        .padding()
-        .background(Color(hex: "ecf0f1"))
-        .cornerRadius(12)
     }
     
-    private func formatTime(_ timeInterval: TimeInterval) -> String {
-        let hours = Int(timeInterval) / 3600
-        let minutes = (Int(timeInterval) % 3600) / 60
-        return String(format: "%dh %dm", hours, minutes)
-    }
-}
-
-struct DailyStatsChart: View {
-    @EnvironmentObject private var settingsManager: SettingsManager
-    
-    var body: some View {
+    @available(iOS 16.0, *)
+    private var focusBreakChartView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Daily Focus Time")
-                .font(.title2)
-                .fontWeight(.bold)
+            Text("Focus vs. Break Time")
+                .font(.headline)
             
             Chart {
-                ForEach(Array(settingsManager.analytics.dailyStats.keys.sorted().suffix(7)), id: \.self) { date in
-                    if let stats = settingsManager.analytics.dailyStats[date] {
-                        BarMark(
-                            x: .value("Date", date, unit: .day),
-                            y: .value("Focus Time", stats.focusTime / 3600)
-                        )
-                        .foregroundStyle(Color(hex: "3498db"))
-                    }
-                }
+                BarMark(
+                    x: .value("Category", "Focus"),
+                    y: .value("Hours", totalFocusHours)
+                )
+                .foregroundStyle(.green)
+                
+                BarMark(
+                    x: .value("Category", "Break"),
+                    y: .value("Hours", totalBreakHours)
+                )
+                .foregroundStyle(.orange)
             }
             .frame(height: 200)
         }
         .padding()
-        .background(Color(hex: "ecf0f1"))
-        .cornerRadius(12)
+        .background(RoundedRectangle(cornerRadius: 12)
+            .fill(Color(.secondarySystemBackground)))
     }
-}
-
-struct FocusTimeCard: View {
-    @EnvironmentObject private var settingsManager: SettingsManager
     
-    var body: some View {
+    private var legacyStatsView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Focus Time Distribution")
-                .font(.title2)
-                .fontWeight(.bold)
+            Text("Focus vs. Break Time")
+                .font(.headline)
             
-            ForEach(Array(settingsManager.analytics.dailyStats.keys.sorted().suffix(7)), id: \.self) { date in
-                if let stats = settingsManager.analytics.dailyStats[date] {
-                    HStack {
-                        Text(date.formatted(date: .abbreviated, time: .omitted))
-                            .font(.subheadline)
-                        
-                        Spacer()
-                        
-                        Text(formatTime(stats.focusTime))
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                    }
+            HStack(spacing: 20) {
+                VStack {
+                    Text("\(totalFocusHours, specifier: "%.1f")")
+                        .font(.title)
+                        .foregroundColor(.green)
+                    Text("Focus Hours")
+                        .font(.caption)
+                }
+                
+                Divider()
+                
+                VStack {
+                    Text("\(totalBreakHours, specifier: "%.1f")")
+                        .font(.title)
+                        .foregroundColor(.orange)
+                    Text("Break Hours")
+                        .font(.caption)
                 }
             }
         }
         .padding()
-        .background(Color(hex: "ecf0f1"))
-        .cornerRadius(12)
+        .background(RoundedRectangle(cornerRadius: 12)
+            .fill(Color(.secondarySystemBackground)))
     }
     
-    private func formatTime(_ timeInterval: TimeInterval) -> String {
-        let hours = Int(timeInterval) / 3600
-        let minutes = (Int(timeInterval) % 3600) / 60
-        return String(format: "%dh %dm", hours, minutes)
-    }
-}
-
-struct OverrideAttemptsCard: View {
-    @EnvironmentObject private var settingsManager: SettingsManager
-    
-    var body: some View {
+    private var blockingStatsView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Override Attempts")
-                .font(.title2)
-                .fontWeight(.bold)
+            Text("Blocking Statistics")
+                .font(.headline)
             
-            ForEach(Array(settingsManager.analytics.dailyStats.keys.sorted().suffix(7)), id: \.self) { date in
-                if let stats = settingsManager.analytics.dailyStats[date] {
-                    HStack {
-                        Text(date.formatted(date: .abbreviated, time: .omitted))
-                            .font(.subheadline)
-                        
-                        Spacer()
-                        
-                        Text("\(stats.overrideAttempts)")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                    }
+            HStack(spacing: 30) {
+                VStack(alignment: .leading) {
+                    Text("Apps Blocked")
+                        .font(.subheadline)
+                    Text("\(settingsManager.selectedApps.count)")
+                        .font(.title2)
+                        .foregroundColor(.blue)
                 }
+                
+                VStack(alignment: .leading) {
+                    Text("Websites Blocked")
+                        .font(.subheadline)
+                    Text("\(settingsManager.selectedWebsites.count)")
+                        .font(.title2)
+                        .foregroundColor(.purple)
+                }
+            }
+            
+            if settingsManager.analytics.overrideAttempts > 0 {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.yellow)
+                    Text("Emergency passes used: \(settingsManager.analytics.overrideAttempts)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 5)
             }
         }
         .padding()
-        .background(Color(hex: "ecf0f1"))
-        .cornerRadius(12)
+        .background(RoundedRectangle(cornerRadius: 12)
+            .fill(Color(.secondarySystemBackground)))
     }
+    
+    // Data calculations
+    private var totalFocusHours: Double {
+        let timeInterval = settingsManager.analytics.totalFocusTime
+        return timeInterval / 3600
+    }
+    
+    private var totalBreakHours: Double {
+        let breakCount = settingsManager.analytics.breaksTaken
+        // Estimate average break time (15 min per break)
+        return Double(breakCount) * 15 / 60
+    }
+}
+
+struct SummaryCard: View {
+    let value: Double
+    let label: String
+    let color: Color
+    let icon: String
+    
+    init(value: Double, label: String, color: Color, icon: String) {
+        self.value = value
+        self.label = label
+        self.color = color
+        self.icon = icon
+    }
+    
+    init(value: Int, label: String, color: Color, icon: String) {
+        self.value = Double(value)
+        self.label = label
+        self.color = color
+        self.icon = icon
+    }
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundColor(color)
+            
+            if value == Double(Int(value)) {
+                Text("\(Int(value))")
+                    .font(.system(size: 28, weight: .bold))
+            } else {
+                Text("\(value, specifier: "%.1f")")
+                    .font(.system(size: 28, weight: .bold))
+            }
+            
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 12)
+            .fill(Color(.secondarySystemBackground)))
+    }
+}
+
+#Preview {
+    AnalyticsView()
+        .environmentObject(FocusManager.shared)
+        .environmentObject(SettingsManager())
 } 
