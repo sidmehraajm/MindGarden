@@ -6,6 +6,9 @@ struct CountdownOverlayView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var timeRemaining: String = "--:--"
     @State private var timer: Timer?
+    @State private var isShowingEmergencyAlert = false
+    @State private var isEmergencyPassGranted = false
+    @State private var progressValue: Double = 1.0
     
     var body: some View {
         ZStack {
@@ -16,14 +19,31 @@ struct CountdownOverlayView: View {
             VStack(spacing: 30) {
                 if focusManager.isInGracePeriod {
                     // Break mode
-                    Text(timeRemaining)
-                        .font(.system(size: 80, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                        .transition(.opacity)
-                    
-                    Text("Break Time")
-                        .font(.title2)
-                        .foregroundColor(.white.opacity(0.8))
+                    ZStack {
+                        Circle()
+                            .stroke(lineWidth: 20)
+                            .opacity(0.3)
+                            .foregroundColor(.gray)
+                        
+                        Circle()
+                            .trim(from: 0.0, to: CGFloat(progressValue))
+                            .stroke(style: StrokeStyle(lineWidth: 20, lineCap: .round, lineJoin: .round))
+                            .foregroundColor(.blue)
+                            .rotationEffect(Angle(degrees: 270.0))
+                            .animation(.linear, value: progressValue)
+                        
+                        VStack {
+                            Text(timeRemaining)
+                                .font(.system(size: 60, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                            
+                            Text("Break Time")
+                                .font(.title2)
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                    }
+                    .frame(width: 250, height: 250)
+                    .padding(.bottom, 20)
                     
                     Button(action: {
                         Task {
@@ -78,9 +98,7 @@ struct CountdownOverlayView: View {
                         }
                         
                         Button(action: {
-                            Task {
-                                await focusManager.requestEmergencyPass()
-                            }
+                            handleEmergencyPass()
                         }) {
                             Text("Emergency Pass (1hr)")
                                 .font(.headline)
@@ -111,6 +129,15 @@ struct CountdownOverlayView: View {
                 startTimer()
             }
         }
+        .padding()
+        .alert("Request Emergency Pass?", isPresented: $isShowingEmergencyAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Confirm") {
+                requestEmergencyPass()
+            }
+        } message: {
+            Text("This will temporarily unlock your apps for 1 hour. Use this only for important tasks.")
+        }
     }
     
     private func startTimer() {
@@ -125,16 +152,38 @@ struct CountdownOverlayView: View {
     private func updateTimeRemaining() {
         guard let endTime = focusManager.breakEndTime else {
             timeRemaining = "--:--"
+            progressValue = 1.0
             return
         }
         
         let remaining = endTime.timeIntervalSince(Date())
         if remaining <= 0 {
             timeRemaining = "00:00"
+            progressValue = 0.0
         } else {
             let minutes = Int(remaining) / 60
             let seconds = Int(remaining) % 60
             timeRemaining = String(format: "%02d:%02d", minutes, seconds)
+            
+            // Calculate progress based on remaining time
+            if let startTime = focusManager.breakStartTime {
+                let totalDuration = endTime.timeIntervalSince(startTime)
+                progressValue = remaining / totalDuration
+            }
+        }
+    }
+    
+    private func handleEmergencyPass() {
+        isShowingEmergencyAlert = true
+    }
+    
+    private func requestEmergencyPass() {
+        Task {
+            isEmergencyPassGranted = await focusManager.requestEmergencyPass()
+            if !isEmergencyPassGranted {
+                // If emergency pass is denied, refresh blocking rules to ensure they're still applied
+                await focusManager.refreshBlockingRules()
+            }
         }
     }
 } 

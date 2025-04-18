@@ -32,12 +32,19 @@ class FocusManager: ObservableObject {
             self.isDeepFocus = isDeepFocus
             self.lastEmergencyPassDate = lastEmergencyPassDate
         }
+        
+        // Calculate remaining seconds
+        var remainingSeconds: TimeInterval {
+            return endTime.timeIntervalSince(Date())
+        }
     }
     
     @Published var currentSession: FocusSession?
     @Published var isActive: Bool = false
     @Published var isInGracePeriod: Bool = false
     @Published var breakEndTime: Date?
+    @Published var breakStartTime: Date?
+    @Published var gracePeriodEndTime: Date?
     
     @Published var totalFocusTime: TimeInterval = 0
     @Published var totalFocusMinutesToday: Int = 0
@@ -51,6 +58,7 @@ class FocusManager: ObservableObject {
     private var timer: Timer?
     private var gracePeriodTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private var notificationSubscription: AnyCancellable?
     
     init() {
         // Empty default initializer used by the 'shared' static property
@@ -65,6 +73,7 @@ class FocusManager: ObservableObject {
         
         Task {
             do {
+                // Request authorization for FamilyControls
                 try await blockingManager.requestAuthorization()
                 
                 // Initialize focus stats
@@ -76,6 +85,9 @@ class FocusManager: ObservableObject {
                 startDeepFocusMonitoring()
                 
                 isActive = true
+                
+                // Apply blocking rules immediately
+                await applyBlockingRules()
             } catch {
                 print("Failed to initialize FocusManager: \(error)")
             }
@@ -86,11 +98,14 @@ class FocusManager: ObservableObject {
         timer?.invalidate()
         gracePeriodTimer?.invalidate()
         cancellables.forEach { $0.cancel() }
+        notificationSubscription?.cancel()
     }
     
     func startBreak(duration: TimeInterval) async {
         isInGracePeriod = true
-        breakEndTime = Date().addingTimeInterval(duration)
+        let now = Date()
+        breakStartTime = now
+        breakEndTime = now.addingTimeInterval(duration)
         
         await removeBlockingRules()
         
@@ -99,6 +114,7 @@ class FocusManager: ObservableObject {
             Task { @MainActor [weak self] in
                 self?.isInGracePeriod = false
                 self?.breakEndTime = nil
+                self?.breakStartTime = nil
                 await self?.applyBlockingRules()
                 self?.updateBreakStats()
             }
@@ -111,6 +127,8 @@ class FocusManager: ObservableObject {
         gracePeriodTimer?.invalidate()
         isInGracePeriod = false
         breakEndTime = nil
+        breakStartTime = nil
+        gracePeriodEndTime = nil
         await applyBlockingRules()
     }
     
@@ -132,7 +150,7 @@ class FocusManager: ObservableObject {
         
         lastEmergencyPassDate = Date()
         
-        await startBreak(duration: 3600)
+        await startBreak(duration: 3600) // 1 hour
         
         Task {
             settingsManager.analytics.lastEmergencyPassDate = lastEmergencyPassDate
@@ -159,26 +177,44 @@ class FocusManager: ObservableObject {
     }
     
     func applyBlockingRules() async {
-        await blockingManager.applyBlockingRules(
-            apps: settingsManager.selectedApps,
-            websites: settingsManager.selectedWebsites
-        )
+        do {
+            let blockingManager: BlockingManager = try DependencyContainer.shared.resolve()
+            let settingsManager: SettingsManager = try DependencyContainer.shared.resolve()
+            
+            await blockingManager.applyBlockingRules(
+                apps: settingsManager.selectedApps,
+                websites: settingsManager.selectedWebsites
+            )
+        } catch {
+            print("Error applying blocking rules: \(error)")
+        }
     }
     
     func removeBlockingRules() async {
-        blockingManager.removeBlockingRules()
+        do {
+            let blockingManager: BlockingManager = try DependencyContainer.shared.resolve()
+            blockingManager.removeBlockingRules()
+        } catch {
+            print("Error removing blocking rules: \(error)")
+        }
     }
     
     private func startDeepFocusMonitoring() {
-        NotificationCenter.default.publisher(for: .deviceActivityMonitorDidChange)
+        // Start monitoring for device activity changes
+        notificationSubscription = NotificationCenter.default.publisher(for: .deviceActivityMonitorDidChange)
             .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    if let self = self, !self.isInGracePeriod {
-                        await self.reapplyBlockingRules()
-                    }
+                guard let self = self, self.isActive, !self.isInGracePeriod else { return }
+                
+                // Reapply blocking rules when device activity changes
+                Task {
+                    await self.refreshBlockingRules()
                 }
             }
-            .store(in: &cancellables)
+    }
+    
+    private func stopDeepFocusMonitoring() {
+        notificationSubscription?.cancel()
+        notificationSubscription = nil
     }
     
     private func reapplyBlockingRules() async {
@@ -188,19 +224,122 @@ class FocusManager: ObservableObject {
     
     // Public method to refresh blocking rules from outside
     func refreshBlockingRules() async {
-        await reapplyBlockingRules()
+        do {
+            let blockingManager: BlockingManager = try DependencyContainer.shared.resolve()
+            await blockingManager.refreshBlockingRules()
+        } catch {
+            print("Error refreshing blocking rules: \(error)")
+        }
     }
     
     func startFocusSession(duration: TimeInterval) async {
         guard !isActive else { return }
         
-        await startBreak(duration: duration)
+        let tier = determineTierFromDuration(duration)
+        let session = FocusSession(
+            tier: tier,
+            startTime: Date(),
+            duration: duration,
+            isDeepFocus: tier == .deep
+        )
+        
+        // Apply blocking rules
+        Task {
+            await applyBlockingRules()
+        }
+        
+        self.currentSession = session
+        self.isActive = true
+        
+        // Cancel any existing timer
+        timer?.invalidate()
+        
+        // Schedule the timer
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateSessionStatus()
+        }
+        
+        // Start monitoring for device activity
+        startDeepFocusMonitoring()
+        
+        // Track the session start for analytics
+        trackSessionStart()
     }
     
-    func endFocusSession() async {
+    private func determineTierFromDuration(_ duration: TimeInterval) -> FocusTier {
+        let minutes = Int(duration / 60)
+        
+        if minutes <= FocusTier.low.rawValue {
+            return .low
+        } else if minutes <= FocusTier.medium.rawValue {
+            return .medium
+        } else if minutes <= FocusTier.high.rawValue {
+            return .high
+        } else {
+            return .deep
+        }
+    }
+    
+    private func updateSessionStatus() {
+        guard let session = currentSession else { return }
+        
+        // Update the remaining time
+        if session.remainingSeconds <= 0 {
+            // Session complete
+            endFocusSession()
+        }
+    }
+    
+    private func trackSessionStart() {
+        // Update analytics for session start
+        let today = Calendar.current.startOfDay(for: Date())
+        var dailyStats = settingsManager.analytics.dailyStats[today] ?? DailyStats()
+        settingsManager.analytics.dailyStats[today] = dailyStats
+    }
+    
+    private func trackCompletedSession() {
+        guard let session = currentSession else { return }
+        
+        // Update analytics for completed session
+        let sessionDuration = session.endTime.timeIntervalSince(session.startTime)
+        
+        // Update total focus time
+        settingsManager.analytics.totalFocusTime += sessionDuration
+        
+        // Update daily stats
+        let today = Calendar.current.startOfDay(for: Date())
+        var dailyStats = settingsManager.analytics.dailyStats[today] ?? DailyStats()
+        dailyStats.focusTime += sessionDuration
+        dailyStats.completedSessions += 1
+        settingsManager.analytics.dailyStats[today] = dailyStats
+        
+        // Update the observable properties
+        totalFocusTime = settingsManager.analytics.totalFocusTime
+        totalFocusMinutesToday = Int(dailyStats.focusTime / 60)
+    }
+    
+    func endFocusSession() {
         guard isActive else { return }
         
-        await removeBlockingRules()
+        // Only track completed sessions if they weren't ended early
+        if let session = currentSession, session.remainingSeconds <= 0 {
+            trackCompletedSession()
+        }
+        
+        isActive = false
+        currentSession = nil
+        
+        // Stop the timer
+        timer?.invalidate()
+        timer = nil
+        
+        // Remove blocking rules
+        Task {
+            await removeBlockingRules()
+        }
+        
+        // Stop monitoring
+        stopDeepFocusMonitoring()
     }
 }
 

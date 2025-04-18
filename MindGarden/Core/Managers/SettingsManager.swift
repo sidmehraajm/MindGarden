@@ -12,6 +12,7 @@ class SettingsManager: ObservableObject {
     private let appsKey = "selectedApps"
     private let websitesKey = "selectedWebsites"
     private let analyticsKey = "analytics"
+    private let activitySelectionKey = "activitySelection"
     private var cancellables = Set<AnyCancellable>()
     
     init() {
@@ -30,6 +31,9 @@ class SettingsManager: ObservableObject {
            let analytics = try? JSONDecoder().decode(Analytics.self, from: analyticsData) {
             self.analytics = analytics
         }
+        
+        // Update daily stats if needed
+        updateDailyStats()
         
         // Save changes
         $selectedApps
@@ -56,6 +60,13 @@ class SettingsManager: ObservableObject {
             .store(in: &cancellables)
     }
     
+    private func updateDailyStats() {
+        let today = Calendar.current.startOfDay(for: Date())
+        if analytics.dailyStats[today] == nil {
+            analytics.dailyStats[today] = DailyStats()
+        }
+    }
+    
     func updateSelectedApps(_ apps: Set<String>) {
         selectedApps = apps
     }
@@ -78,6 +89,13 @@ class SettingsManager: ObservableObject {
         if let data = try? JSONEncoder().encode(selectedWebsites) {
             userDefaults.set(data, forKey: websitesKey)
         }
+    }
+    
+    // Helper to get a selection for the FamilyActivityPicker
+    func createActivitySelection() -> FamilyActivitySelection {
+        let selection = FamilyActivitySelection()
+        // You could add any predefined selections here
+        return selection
     }
 }
 

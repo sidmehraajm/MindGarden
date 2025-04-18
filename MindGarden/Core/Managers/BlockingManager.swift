@@ -48,6 +48,8 @@ class BlockingManager: ObservableObject {
         #endif
     }
     
+    /// Requests authorization to use Family Controls
+    /// - Throws: An error if the authorization request fails
     func requestAuthorization() async throws {
         do {
             try await center.requestAuthorization(for: .individual)
@@ -58,38 +60,63 @@ class BlockingManager: ObservableObject {
         }
     }
     
+    /// Applies blocking rules for the specified apps and websites
+    /// - Parameters:
+    ///   - apps: Set of app bundle identifiers to block
+    ///   - websites: Set of website domains to block
     func applyBlockingRules(apps: Set<String>, websites: Set<String>) async {
         // Clear existing rules before applying new ones
-        store.clearAllSettings()
+        removeBlockingRules()
         
-        if !apps.isEmpty || !websites.isEmpty {
-            // Set up application blocking - using categories for now
-            // In a real implementation with iOS 18+, you would use
-            // specific app tokens from FamilyActivitySelection
-            if !apps.isEmpty {
+        if apps.isEmpty && websites.isEmpty {
+            return // Nothing to block
+        }
+        
+        // Set up application blocking
+        if !apps.isEmpty {
+            // In recent iOS versions, we can't directly convert bundle IDs to tokens
+            // So we use a combination of selection-based and category-based blocking
+            
+            // For apps, use the appropriate shield settings
+            if #available(iOS 16.0, *) {
+                // In iOS 16+, we use a more category-based approach
+                store.shield.applications = .none
+                
+                // Shield based on all categories since we can't directly map to categories
+                store.shield.applicationCategories = .all()
+            } else {
+                // For iOS 15, we fall back to simply blocking all apps
                 store.shield.applicationCategories = .all()
             }
-            
-            // Set up website blocking - using categories for now
-            if !websites.isEmpty {
+        }
+        
+        // Set up website blocking
+        if !websites.isEmpty {
+            // For websites, use the appropriate shield settings
+            if #available(iOS 16.0, *) {
+                // In iOS 16+, we use a more category-based approach
+                store.shield.webDomains = .none
+                
+                // Shield based on all categories since we can't directly map to categories
+                store.shield.webDomainCategories = .all()
+            } else {
+                // For iOS 15, we fall back to simply blocking all web domains
                 store.shield.webDomainCategories = .all()
             }
-            
-            // Enable shield for both applications and web domains
-            // This will restrict access based on the categories above
-            store.shield.applicationCategories = apps.isEmpty ? .none : .all()
-            store.shield.webDomainCategories = websites.isEmpty ? .none : .all()
         }
     }
     
+    /// Removes all blocking rules
     func removeBlockingRules() {
         store.clearAllSettings()
     }
     
+    /// Refreshes the blocking rules by reapplying them
     func refreshBlockingRules() async {
         await reapplyBlockingRules()
     }
     
+    /// Reapplies blocking rules based on the current settings
     private func reapplyBlockingRules() async {
         do {
             let settingsManager: SettingsManager = try DependencyContainer.shared.resolve()
